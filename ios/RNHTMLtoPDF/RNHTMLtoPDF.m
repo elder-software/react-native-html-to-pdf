@@ -14,7 +14,8 @@
 
 @implementation UIPrintPageRenderer (PDF)
 - (NSData*) printToPDF:(NSInteger**)_numberOfPages
-                   backgroundColor:(UIColor*)_bgColor
+            backgroundColor:(UIColor*)_bgColor
+            headerInfo:(NSString *)headerInfo
 {
     NSMutableData *pdfData = [NSMutableData data];
     UIGraphicsBeginPDFContextToData( pdfData, self.paperRect, nil );
@@ -33,6 +34,9 @@
         CGContextFillRect(currentContext, self.paperRect);
 
         [self drawPageAtIndex: i inRect: bounds];
+      if (headerInfo) {
+          [self drawHeaderForPageAtIndex:i inRect:bounds withHeaderInfo:headerInfo];
+      }
     }
 
     *_numberOfPages = self.numberOfPages;
@@ -40,6 +44,26 @@
     UIGraphicsEndPDFContext();
     return pdfData;
 }
+
+- (void)drawHeaderForPageAtIndex:(NSInteger)index
+                          inRect:(CGRect)rect
+                 withHeaderInfo:(NSString *)headerInfo {
+    // Draw the NSAttributedString
+    NSData *htmlData = [headerInfo dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *options = @{ NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType };
+    NSAttributedString *attributedString = [[NSAttributedString alloc] initWithData:htmlData options:options documentAttributes:nil error:nil];
+    [attributedString drawInRect:rect];
+  
+  CGContextRef context = UIGraphicsGetCurrentContext();
+
+  if (index > 0) {
+    CGContextMoveToPoint(context, CGRectGetMinX(rect) + 27, 110);
+    CGContextAddLineToPoint(context, CGRectGetMaxX(rect) - 27, 110);
+    CGContextSetStrokeColorWithColor(context, [UIColor blackColor].CGColor);
+    CGContextStrokePath(context);
+  }
+}
+
 @end
 
 @implementation RNHTMLtoPDF {
@@ -47,6 +71,7 @@
     RCTPromiseResolveBlock _resolveBlock;
     RCTPromiseRejectBlock _rejectBlock;
     NSString *_html;
+  NSString *_headerHtml;
     NSString *_fileName;
     NSString *_filePath;
     UIColor *_bgColor;
@@ -88,6 +113,12 @@ RCT_EXPORT_METHOD(convert:(NSDictionary *)options
     if (options[@"html"]){
         _html = [RCTConvert NSString:options[@"html"]];
     }
+
+  if (options[@"headerHtml"]) {
+    _headerHtml = [RCTConvert NSString:options[@"headerHtml"]];
+  } else {
+    _headerHtml = nil;
+  }
 
     if (options[@"fileName"]){
         _fileName = [RCTConvert NSString:options[@"fileName"]];
@@ -192,12 +223,13 @@ RCT_EXPORT_METHOD(convert:(NSDictionary *)options
     // If the printableRect defines the printable area of the page
     CGRect paperRect = CGRectMake(0, 0, _PDFSize.width, _PDFSize.height);
     CGRect printableRect = CGRectMake(_paddingLeft, _paddingTop, _PDFSize.width-(_paddingLeft + _paddingRight), _PDFSize.height-(_paddingBottom + _paddingTop));
-    
+  CGFloat headerHeight = 100.0f;
     
     [render setValue:[NSValue valueWithCGRect:paperRect] forKey:@"paperRect"];
     [render setValue:[NSValue valueWithCGRect:printableRect] forKey:@"printableRect"];
-    
-    NSData * pdfData = [render printToPDF:&_numberOfPages backgroundColor:_bgColor ];
+  [render setValue:@(headerHeight) forKey:@"headerHeight"];
+
+    NSData * pdfData = [render printToPDF:&_numberOfPages backgroundColor:_bgColor headerInfo:_headerHtml];
     
     if (pdfData) {
         NSString *pdfBase64 = @"";
