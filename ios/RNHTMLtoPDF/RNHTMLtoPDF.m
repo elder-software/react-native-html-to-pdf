@@ -15,28 +15,53 @@
 @implementation UIPrintPageRenderer (PDF)
 - (NSData*) printToPDF:(NSInteger**)_numberOfPages
             backgroundColor:(UIColor*)_bgColor
-            headerInfo:(NSString *)headerInfo
-{
+            titleInfo:(NSString *)titleInfo
+            headerInfo:(NSString *)headerInfo {
+    
+    NSInteger titlePageCount = 0;
+    if (titleInfo) {
+        // Create temporary renderer to calculate title pages
+        UIPrintPageRenderer *titleRenderer = [[UIPrintPageRenderer alloc] init];
+        NSData *htmlData = [titleInfo dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *options = @{ NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType };
+        NSAttributedString *attributedString = [[NSAttributedString alloc] initWithData:htmlData
+                                                                              options:options
+                                                                   documentAttributes:nil
+                                                                              error:nil];
+        CGRect bounds = self.paperRect;
+        titlePageCount = ceil(attributedString.size.height / bounds.size.height);
+    }
+
     NSMutableData *pdfData = [NSMutableData data];
-    UIGraphicsBeginPDFContextToData( pdfData, self.paperRect, nil );
+    UIGraphicsBeginPDFContextToData(pdfData, self.paperRect, nil);
 
     [self prepareForDrawingPages: NSMakeRange(0, self.numberOfPages)];
 
     CGRect bounds = UIGraphicsGetPDFContextBounds();
 
-    for ( int i = 0 ; i < self.numberOfPages ; i++ )
-    {
+    // Render all pages
+    for (int i = 0; i < self.numberOfPages; i++) {
         UIGraphicsBeginPDFPage();
-
-
+        
         CGContextRef currentContext = UIGraphicsGetCurrentContext();
         CGContextSetFillColorWithColor(currentContext, _bgColor.CGColor);
         CGContextFillRect(currentContext, self.paperRect);
 
-        [self drawPageAtIndex: i inRect: bounds];
-      if (headerInfo) {
-          [self drawHeaderForPageAtIndex:i inRect:bounds withHeaderInfo:headerInfo];
-      }
+        if (i < titlePageCount && titleInfo) {
+            // Render title pages
+            [self drawTitlePageAtIndex:i inRect:bounds withTitleInfo:titleInfo];
+        } else {
+            // Calculate the correct content page index
+            NSInteger contentPageIndex = i - titlePageCount;
+            
+            // Render regular content with the correct page index
+            [self drawPageAtIndex:contentPageIndex inRect:bounds];
+            
+            // Only draw header for non-title pages
+            if (headerInfo) {
+                [self drawHeaderForPageAtIndex:contentPageIndex inRect:bounds withHeaderInfo:headerInfo];
+            }
+        }
     }
 
     *_numberOfPages = self.numberOfPages;
@@ -45,23 +70,43 @@
     return pdfData;
 }
 
+- (void)drawTitlePageAtIndex:(NSInteger)index
+                     inRect:(CGRect)rect
+               withTitleInfo:(NSString *)titleInfo {
+    NSData *htmlData = [titleInfo dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *options = @{ NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType };
+    NSAttributedString *attributedString = [[NSAttributedString alloc] initWithData:htmlData
+                                                                          options:options
+                                                               documentAttributes:nil
+                                                                          error:nil];
+    
+    // Calculate offset based on page index to show correct portion of title content
+    CGFloat pageHeight = rect.size.height;
+    CGRect drawRect = rect;
+    drawRect.origin.y = -index * pageHeight;
+    [attributedString drawInRect:drawRect];
+}
+
 - (void)drawHeaderForPageAtIndex:(NSInteger)index
-                          inRect:(CGRect)rect
-                 withHeaderInfo:(NSString *)headerInfo {
+                         inRect:(CGRect)rect
+                withHeaderInfo:(NSString *)headerInfo {
     // Draw the NSAttributedString
     NSData *htmlData = [headerInfo dataUsingEncoding:NSUTF8StringEncoding];
     NSDictionary *options = @{ NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType };
-    NSAttributedString *attributedString = [[NSAttributedString alloc] initWithData:htmlData options:options documentAttributes:nil error:nil];
+    NSAttributedString *attributedString = [[NSAttributedString alloc] initWithData:htmlData
+                                                                          options:options
+                                                               documentAttributes:nil
+                                                                          error:nil];
     [attributedString drawInRect:rect];
-  
-  CGContextRef context = UIGraphicsGetCurrentContext();
-
-  if (index > 0) {
-    CGContextMoveToPoint(context, CGRectGetMinX(rect) + 27, 110);
-    CGContextAddLineToPoint(context, CGRectGetMaxX(rect) - 27, 110);
-    CGContextSetStrokeColorWithColor(context, [UIColor blackColor].CGColor);
-    CGContextStrokePath(context);
-  }
+    
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    
+    if (index > 0) {
+        CGContextMoveToPoint(context, CGRectGetMinX(rect) + 27, 110);
+        CGContextAddLineToPoint(context, CGRectGetMaxX(rect) - 27, 110);
+        CGContextSetStrokeColorWithColor(context, [UIColor blackColor].CGColor);
+        CGContextStrokePath(context);
+    }
 }
 
 @end
@@ -72,6 +117,7 @@
     RCTPromiseRejectBlock _rejectBlock;
     NSString *_html;
   NSString *_headerHtml;
+    NSString *_titleHtml;
     NSString *_fileName;
     NSString *_filePath;
     UIColor *_bgColor;
@@ -110,15 +156,21 @@ RCT_EXPORT_METHOD(convert:(NSDictionary *)options
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject) {
 
-    if (options[@"html"]){
+    if (options[@"html"]) {
         _html = [RCTConvert NSString:options[@"html"]];
     }
 
-  if (options[@"headerHtml"]) {
-    _headerHtml = [RCTConvert NSString:options[@"headerHtml"]];
-  } else {
-    _headerHtml = nil;
-  }
+    if (options[@"headerHtml"]) {
+        _headerHtml = [RCTConvert NSString:options[@"headerHtml"]];
+    } else {
+        _headerHtml = nil;
+    }
+    
+    if (options[@"titleHtml"]) {
+        _titleHtml = [RCTConvert NSString:options[@"titleHtml"]];
+    } else {
+        _titleHtml = nil;
+    }
 
     if (options[@"fileName"]){
         _fileName = [RCTConvert NSString:options[@"fileName"]];
@@ -227,21 +279,21 @@ RCT_EXPORT_METHOD(convert:(NSDictionary *)options
     
     [render setValue:[NSValue valueWithCGRect:paperRect] forKey:@"paperRect"];
     [render setValue:[NSValue valueWithCGRect:printableRect] forKey:@"printableRect"];
-  [render setValue:@(headerHeight) forKey:@"headerHeight"];
-
-    NSData * pdfData = [render printToPDF:&_numberOfPages backgroundColor:_bgColor headerInfo:_headerHtml];
+    [render setValue:@(headerHeight) forKey:@"headerHeight"];
+    
+    NSData *pdfData = [render printToPDF:&_numberOfPages backgroundColor:_bgColor titleInfo:_titleHtml headerInfo:_headerHtml];
     
     if (pdfData) {
         NSString *pdfBase64 = @"";
-        
         [pdfData writeToFile:_filePath atomically:YES];
         if (_base64) {
             pdfBase64 = [pdfData base64EncodedStringWithOptions:0];
         }
-        NSDictionary *data = [NSDictionary dictionaryWithObjectsAndKeys:
-                              pdfBase64, @"base64",
-                              [NSString stringWithFormat: @"%ld", (long)_numberOfPages], @"numberOfPages",
-                              _filePath, @"filePath", nil];
+        NSDictionary *data = @{
+            @"base64": pdfBase64,
+            @"numberOfPages": [NSString stringWithFormat: @"%ld", (long)_numberOfPages],
+            @"filePath": _filePath
+        };
         _resolveBlock(data);
     } else {
         NSError *error;
