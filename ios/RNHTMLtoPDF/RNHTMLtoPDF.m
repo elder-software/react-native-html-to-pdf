@@ -9,6 +9,7 @@
 #import <React/UIView+React.h>
 #import <React/RCTUtils.h>
 #import "RNHTMLtoPDF.h"
+#import <PDFKit/PDFKit.h>
 
 #define PDFSize CGSizeMake(612,792)
 
@@ -152,6 +153,61 @@ RCT_EXPORT_MODULE();
     return self;
 }
 
+RCT_EXPORT_METHOD(join:(NSDictionary *)options
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+    
+    NSArray *pdfPaths = options[@"pdfPaths"];
+    NSString *outputPath = options[@"outputPath"];
+    
+    // Validate input parameters
+    if (!pdfPaths || ![pdfPaths isKindOfClass:[NSArray class]] || !outputPath) {
+        reject(@"invalid_params", @"Missing or invalid required parameters", nil);
+        return;
+    }
+    
+    // Initialize a merged PDF document
+    PDFDocument *mergedPDF = [[PDFDocument alloc] init];
+    if (!mergedPDF) {
+        reject(@"pdf_creation_failed", @"Failed to initialize PDF document", nil);
+        return;
+    }
+    
+    NSInteger currentPage = 0;
+    
+    // Iterate over the input PDF paths
+    for (NSString *pdfPath in pdfPaths) {
+        NSURL *pdfURL = [NSURL fileURLWithPath:pdfPath];
+        PDFDocument *pdfDoc = [[PDFDocument alloc] initWithURL:pdfURL];
+        
+        if (!pdfDoc) {
+            reject(@"invalid_pdf", [NSString stringWithFormat:@"Could not open PDF at path: %@", pdfPath], nil);
+            return;
+        }
+        
+        // Append all pages from the current PDF to the merged PDF
+        for (NSInteger i = 0; i < pdfDoc.pageCount; i++) {
+            PDFPage *page = [pdfDoc pageAtIndex:i];
+            [mergedPDF insertPage:page atIndex:currentPage];
+            currentPage++;
+        }
+    }
+    
+    // Save the merged PDF to the specified output path
+    NSURL *outputURL = [NSURL fileURLWithPath:outputPath];
+    BOOL saveSuccess = [mergedPDF writeToURL:outputURL];
+    if (saveSuccess) {
+        // Return result with output path and page count
+        NSDictionary *result = @{
+            @"outputPath": outputPath,
+            @"pageCount": @(currentPage)
+        };
+        resolve(result);
+    } else {
+        reject(@"save_failed", @"Failed to save merged PDF", nil);
+    }
+}
+
 RCT_EXPORT_METHOD(convert:(NSDictionary *)options
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject) {
@@ -275,7 +331,7 @@ RCT_EXPORT_METHOD(convert:(NSDictionary *)options
     // If the printableRect defines the printable area of the page
     CGRect paperRect = CGRectMake(0, 0, _PDFSize.width, _PDFSize.height);
     CGRect printableRect = CGRectMake(_paddingLeft, _paddingTop, _PDFSize.width-(_paddingLeft + _paddingRight), _PDFSize.height-(_paddingBottom + _paddingTop));
-  CGFloat headerHeight = 100.0f;
+    CGFloat headerHeight = (_headerHtml == nil || [_headerHtml isEqual: @""]) ? 0.0f : 100.0f;
     
     [render setValue:[NSValue valueWithCGRect:paperRect] forKey:@"paperRect"];
     [render setValue:[NSValue valueWithCGRect:printableRect] forKey:@"printableRect"];
