@@ -103,8 +103,13 @@
     CGContextRef context = UIGraphicsGetCurrentContext();
     
     if (index > 0) {
-        CGContextMoveToPoint(context, CGRectGetMinX(rect) + 27, 110);
-        CGContextAddLineToPoint(context, CGRectGetMaxX(rect) - 27, 110);
+        // Draw a horizontal line at the top of continuation pages so the body
+        // table appears "closed" at the top. The y value must line up with where
+        // WebKit's viewPrintFormatter actually begins rendering content on
+        // continuation pages. That position is pushed below the headerHeight
+        CGFloat lineY = 111;
+        CGContextMoveToPoint(context, CGRectGetMinX(rect) + 22, lineY);
+        CGContextAddLineToPoint(context, CGRectGetMaxX(rect) - 22, lineY);
         CGContextSetStrokeColorWithColor(context, [UIColor blackColor].CGColor);
         CGContextStrokePath(context);
     }
